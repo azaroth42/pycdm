@@ -12,13 +12,13 @@ from pyld import jsonld
 import copy
 
 class LDPResource(object):
-	_type = "ldp:RDFSource"
-
 	uri = ""
 	slug = ""
-	json = {}
 	data = ""
-	context = {}
+	link_header = ""
+	etag = ""
+	contentType = ""
+	container = None
 
 	def __init__(self, uri="", slug="", container=None):
 		self.uri = uri
@@ -27,17 +27,11 @@ class LDPResource(object):
 		elif uri:
 			# split to find the slug
 			self.slug = os.path.split(uri)[1]
-		self.data = ""
-		self.json = {}
-		self.container = container
-		# self.context = self.namespaces.copy()
-		self.ldp_headers_post = {'Content-Type':'application/ld+json'}
-
+		self.data = ""		
 		self.link_header = ""
 		self.etag = ""
 		self.contentType = ""
-		if self._type:
-			self.add_field('@type', self._type)
+		self.container = container		
 
 	def read(self, filename):
 		# Read content in from disk
@@ -50,6 +44,67 @@ class LDPResource(object):
 			raise ValueError()
 		self.data = fh.read()
 		fh.close()
+
+	def create(self):
+		# POST representation to container
+		hdrs = {'Content-Type': self.contentType}
+		if self.slug:
+			hdrs['Slug'] = self.slug
+
+		req = requests.post(url=self.container.uri, data=self.data, headers=hdrs)
+		req.raise_for_status()
+
+		status = req.status_code
+		resp_headers = req.headers
+		self.uri = resp_headers['Location']
+		self.etag = resp_headers['etag']
+
+	def update(self):
+		hdrs = {'Content-Type': self.contentType}
+		if self.etag:
+			hdrs['If-Match'] = self.etag
+		req = requests.put(url=self.uri, headers=hdrs)
+		req.raise_for_status()		
+
+	def delete(self, tombstone=False):
+		if not self.uri:
+			raise ValueError()
+		else:
+			if self.etag:
+				hdrs={'If-Match': self.etag}
+			else:
+				hdrs = {}
+			req = requests.delete(url=self.uri, headers=hdrs)
+			req.raise_for_status()	
+
+			if tombstone:
+				# also delete the tombstone associated with this resource
+				tomburi = os.path.join(self.uri, "fcr:tombstone")
+				req = requests.delete(url=tomburi)
+				req.raise_for_status()
+
+class NonRdfSource(LDPResource):
+	_type = "ldp:NonRDFSource"
+
+	def __init__(self, uri="", slug="", filename="", data=""):
+		super(NonRdfSource, self).__init__(uri, slug)		
+		if not uri:
+			if data:
+				self.data = data
+			elif filename:
+				self.read(filename)
+
+class RdfSource(LDPResource):
+	_type = "ldp:RDFSource"
+	json = {}
+	context = {}
+
+	def __init__(self, uri="", slug="", container=None):
+		super(RdfSource, self).__init__(uri=uri, slug=slug, container=container)
+		self.json = {}
+		self.contentType = 'application/ld+json'
+		if self._type:
+			self.add_field('@type', self._type)
 
 	def add_field(self, what, value):
 		# ensure non-duplicates
@@ -91,40 +146,22 @@ class LDPResource(object):
 
 		js = self.to_jsonld()
 		jstr = json.dumps(js)
-
-		# POST representation to uri
-		uri = self.container.uri
-		hdrs = self.ldp_headers_post.copy()
-		if self.slug:
-			hdrs['Slug'] = self.slug
-
-		req = requests.post(url=uri, data=jstr, headers=hdrs)
-		print "uri: %s\nheaders: %r\ndata: %s" % (uri, hdrs,jstr)
-
-		req.raise_for_status()
-		status = req.status_code
-		resp_headers = req.headers
-		resp_data = req.content
-		if status == 201:
-			self.uri = resp_headers['Location']
-			self.etag = resp_headers['etag']
+		self.data  = jstr
+		super(RdfSource, self).create()
 
 	def update(self):
-		pass
-
-	def delete(self):
 		if not self.uri:
 			raise ValueError()
-		else:
-			if self.etag:
-				hdrs={'If-Match': self.etag}
-			else:
-				hdrs = {}
-			req = requests.delete(url=self.uri, headers=hdrs)
-			req.raise_for_status()	
+		elif not self.json:
+			raise ValueError()
+
+		js = self.to_jsonld()
+		jstr = json.dumps(js)
+		self.data = jstr
+		super(RdfSource, self).update()
 
 
-class Container(LDPResource):
+class Container(RdfSource):
 	_type = "ldp:Container"
 	contains = []
 	_contains_map = {}
@@ -216,16 +253,7 @@ class IndirectContainer(DirectContainer):
 			js['ldp:insertedContentRelation'] = self.insertedContentRelation
 		return js
 
-class NonRDFSource(LDPResource):
-	_type = "ldp:NonRDFSource"
 
-	def __init__(self, uri="", slug="", filename="", data=""):
-		super(NonRDFSource, self).__init__(uri, slug)		
-		if not uri:
-			if data:
-				self.data = data
-			elif filename:
-				self.read(filename)
 
 
 # PCDM resources contain containers
@@ -235,14 +263,16 @@ class PcdmResource(Container):
 	relatedObjects = []
 	relatedObjectsContainer = None
 	_proxyHash = {}
+	ordered = False
 
-	def __init__(self, uri="", slug=""):
+	def __init__(self, uri="", slug="", ordered=False):
 		self._proxyHash = {}
 		# members = list of Proxy objects
 		self.members = []
 		self.related_objects = []
 		self.membersContainer = None
 		self.relatedObjectsContainer = None
+		self.ordered = ordered
 		super(PcdmResource, self).__init__(uri, slug)
 
 	def build_from_rdf(self, reader):
@@ -258,6 +288,9 @@ class PcdmResource(Container):
 		relatedObjects.build()
 		self.membersContainer = members
 		self.relatedObjectsContainer = relatedObjects
+
+		if self.json.has_key('iana:first'):
+			self.ordered = True
 
 	# post init, do setup if going to do create
 	def setup(self):
@@ -275,6 +308,13 @@ class PcdmResource(Container):
 		relatedObjects.insertedContentRelation = 'ore:proxyFor'		
 		self.relatedObjectsContainer = relatedObjects
 
+	def to_jsonld(self):
+		js = super(PcdmResource, self).to_jsonld()
+		if self.ordered and self.members:
+			js['iana:first'] = self.get_proxy(self.members[0])
+			js['iana:last'] = self.get_proxy(self.members[-1])
+		return js
+
 	def create(self):
 		super(PcdmResource, self).create()
 		self.create_child(self.membersContainer)
@@ -282,9 +322,21 @@ class PcdmResource(Container):
 
 	def add_member(self, what): 
 		# Create & return the proxy for the member object/collection
-		p = Proxy(slug=what.slug, proxy_for = what, proxy_in = self)
-		self.members.append(p)
+		p = Proxy(slug=what.slug)
+		p.proxy_for = what
+		p.proxy_in = self		
+		# members is authoritative for first/last
+		self.members.append(what)
 		self._proxyHash[what] = p
+
+		if self.ordered:
+			# manipulate the object list
+			if self.members:
+				prev = self._proxyHash[self.members[-1]]
+				prev.next = p
+				p.prev = prev
+
+		self.membersContainer.create_child(p)
 		return p
 
 	def remove_member(self, what):
@@ -304,22 +356,6 @@ class PcdmResource(Container):
 	def get_proxy(self, what):
 		return self._proxyHash[what]
 
-	def set_first(self, what):
-		if not type(what) == Proxy:
-			what = self.get_proxy(what)
-		self.first = what
-
-	def get_first(self, what):
-		return self.first.proxy_for
-
-	def set_last(self, what):
-		if not type(what) == Proxy:
-			what = self.get_proxy(what)
-		self.last = what
-
-	def get_last(self, what):
-		return self.last.proxy_for
-
 
 class Collection(PcdmResource):
 	_type = "pcdm:Collection"
@@ -333,7 +369,7 @@ class Object(PcdmResource):
 	relatedFilesContainer = None
 
 	def __init__(self, uri="", slug="", ordered=False):
-		super(Object, self).__init__(uri=uri, slug=slug)
+		super(Object, self).__init__(uri=uri, slug=slug, ordered=ordered)
 		# files / related_files are pcdm:File objects
 		self.files = []
 		self.related_files = []
@@ -352,6 +388,7 @@ class Object(PcdmResource):
 
 	def setup(self):
 		# create the containers
+		super(Object, self).setup()
 		filesc = DirectContainer(slug='files')
 		filesc.membershipResource = self
 		filesc.hasMemberRelation = 'pcdm:hasFile'
@@ -367,7 +404,7 @@ class Object(PcdmResource):
 		self.create_child(self.relatedFilesContainer)
 
 	def add_file(self, what):
-		pass
+		self.filesContainer.create_child(what)
 
 	def remove_file(self, what):
 		pass
@@ -378,17 +415,39 @@ class Object(PcdmResource):
 	def remove_related_file(self, what):
 		pass
 
-class Proxy(LDPResource):
+class Proxy(RdfSource):
 	_type = "ore:Proxy"
 	proxy_for=None
 	proxy_in= None
 	next = None
 	prev = None
 
-	def __init__(self, uri="", slug="", proxy_for=None, proxy_in=None):
-		self.proxy_for = proxy_for
-		self.proxy_in = proxy_in
+	def __init__(self, uri="", slug=""):
+		self.proxy_for = None
+		self.proxy_in = None
 		super(Proxy, self).__init__(uri, slug)
+
+	def to_jsonld(self):
+		js = super(Proxy, self).to_jsonld()
+		if self.proxy_for:
+			js['ore:proxyFor'] = self.proxy_for.uri
+		if self.proxy_in:
+			js['ore:proxyIn'] = self.proxy_in.uri
+		if self.next:
+			js['iana:next'] = self.next.uri
+		if self.prev:
+			js['iana:prev'] = self.prev.uri
+		return js
+
+	def set_proxy_for(self, what):
+		pass
+	def set_proxy_in(self, what):
+		pass
+
+	def build_from_rdf(self, reader):
+		super(Proxy, self).build_from_rdf(reader)
+		self.proxy_for = reader.retrieve(self.json['ore:proxyFor'])
+		self.proxy_in = reader.retrieve(self.json['ore:proxyIn'])		
 
 	# Must be Proxy
 	def set_next(self, what):
@@ -402,7 +461,7 @@ class Proxy(LDPResource):
 		what.set_next(self)
 
 
-class File(NonRDFSource):
+class File(NonRdfSource):
 	pass
 	
 
@@ -453,7 +512,9 @@ class LDPReader(object):
 		cmap['ldp:DirectContainer'] = DirectContainer
 		cmap['ldp:BasicContainer'] = BasicContainer
 		cmap['ldp:Container'] = Container
-		cmap['ldp:RDFSource'] = LDPResource
+		cmap['ldp:RDFSource'] = RdfSource
+		cmap['ldp:NonRDFSource'] = NonRdfSource
+		cmap['pcdm:File'] = NonRdfSource
 		self.class_map = cmap
 
 		self.object_map = {}
@@ -521,6 +582,8 @@ class LDPReader(object):
 			what.context['ldp:isMemberOfRelation'] = {'@type': '@id'}
 			what.context['ldp:membershipResource'] = {'@type': '@id'}
 			what.context['ldp:insertedContentRelation'] = {'@type': '@id'}
+			what.context['ore:proxyFor'] = {'@type': '@id'}
+			what.context['ore:proxyIn'] = {'@type': '@id'}
 			try:
 				what.build_from_rdf(self)
 			except:
@@ -531,35 +594,53 @@ class LDPReader(object):
 		return what
 
 
-
 fedora4base = "http://localhost:8080/rest/"
 reader = LDPReader()
 base = reader.retrieve(fedora4base)
 
 
+def clean_postcard():
+	slugs = ['Postcards', 'Postcard', 'Front', 'Back']
+	for s in slugs:
+		uri = os.path.join(fedora4base, s)
+		req = requests.delete(uri)
+		try:
+			req.raise_for_status()
+			uri2 = os.path.join(uri, 'fcr:tombstone')
+			req = requests.delete(uri2)	
+		except:
+			pass
+
+
 def test_postcard():
-        c = Collection(slug='Postcards')
-        c.setup()
-        c.add_field('dc:title', "Postcards Collection")
-        base.create_child(c)
+    c = Collection(slug='Postcards')
+    c.setup()
+    c.add_field('dc:title', "Postcards Collection")
+    base.create_child(c)
 
-        pc = Object(slug='Postcard')
-        pc.setup()
-        pc.add_field('dc:title', 'Postcard')
-        base.create_child(pc)
-        #c.add_member(pc)
+    pc = Object(slug='Postcard')
+    pc.setup()
+    pc.add_field('dc:title', 'Postcard')
+    base.create_child(pc)    
+    pcp = c.add_member(pc)
 
-        #front = Object(slug='Front')
-        #pc.add_member(front)
-        #back = Object(slug='Back')
-        #pc.add_member(back)
+    front = Object(slug='Front', ordered=True)
+    front.setup()
+    base.create_child(front)
+    pc.add_member(front)
 
-        #pf = pc.set_first(front)
-        #pb = pc.set_last(back)
-        #pf.set_next(pb)
+    back = Object(slug='Back')
+    back.setup()
+    base.create_child(back)
+    pc.add_member(back)
 
-        #ff = File(slug="front.jpg")
-        #front.add_file(ff)
-        #bf = File(slug="back.jpg")
-        #back.add_file(bf)
 
+    ff = File(slug="front.jpg", filename="../front.jpg")
+    ff.contentType = "image/jpeg"
+    front.add_file(ff)
+
+    bf = File(slug="back.jpg", filename="../back.jpg")
+    bf.contentType = "image/jpeg"
+    back.add_file(bf)
+
+    return c
