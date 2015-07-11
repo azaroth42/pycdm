@@ -175,7 +175,7 @@ class Container(RdfSource):
 		super(Container, self).build_from_rdf(reader)
 		if self.json and self.json.has_key('ldp:contains'):
 			# And be ready to replace these with real objects later
-			self.contains = self.json[key]
+			self.contains = self.json['ldp:contains']
 
 	def create_child(self, what):
 		# Given an LDPResource, create it in self
@@ -284,8 +284,6 @@ class PcdmResource(Container):
 
 		members = reader.retrieve(membersuri)
 		relatedObjects = reader.retrieve(relateduri)
-		members.build()
-		relatedObjects.build()
 		self.membersContainer = members
 		self.relatedObjectsContainer = relatedObjects
 
@@ -375,14 +373,12 @@ class Object(PcdmResource):
 		self.related_files = []
 
 	def build_from_rdf(self, reader):
-		super(Object, self).build()
+		super(Object, self).build_from_rdf(reader)
 		# Check if members in contains
 		filesuri = os.path.join(self.uri, 'files')
 		relatedfilesuri = os.path.join(self.uri, 'relatedFiles')
 		filesc = reader.retrieve(filesuri)
 		relatedfilesc = reader.retrieve(relatedfilesuri)
-		filesc.build()
-		relatedfilesc.build()
 		self.filesContainer = filesc
 		self.relatedFilesContainer = relatedfilesc
 
@@ -545,6 +541,11 @@ class LDPReader(object):
 		return js
 
 	def retrieve(self, uri):
+		print "Getting: " + uri
+
+		if self.object_map.has_key(uri):
+			return self.object_map[uri]
+
 		req = requests.get(url=uri, headers=self.ldp_headers_get)
 		req.raise_for_status()
 
@@ -587,7 +588,7 @@ class LDPReader(object):
 			try:
 				what.build_from_rdf(self)
 			except:
-				pass
+				raise
 		else:
 			raise ValueError()
 
@@ -644,3 +645,6 @@ def test_postcard():
     back.add_file(bf)
 
     return c
+
+def build_postcard():
+	c = reader.retrieve(fedora4base + "Postcards")
