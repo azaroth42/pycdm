@@ -342,6 +342,10 @@ class PcdmResource(Container):
 		relatedObjects.insertedContentRelation = 'ore:proxyFor'		
 		self.relatedObjectsContainer = relatedObjects
 
+	def build_contents(self, reader):
+		self.membersContainer.build_contents(reader)
+		self.relatedObjectsContainer.build_contents(reader)
+
 	def to_jsonld(self):
 		js = super(PcdmResource, self).to_jsonld()
 		if self.ordered and self.members:
@@ -416,6 +420,11 @@ class Object(PcdmResource):
 		relatedfilesc = reader.retrieve(relatedfilesuri)
 		self.filesContainer = filesc
 		self.relatedFilesContainer = relatedfilesc
+
+	def build_contents(self, reader):
+		super(Object, self).build_contents(reader)
+		self.filesContainer.build_contents(reader)
+		self.relatedFilesContainer.build_contents(reader)
 
 	def setup(self):
 		# create the containers
@@ -693,12 +702,18 @@ def test_postcard():
     return c
 
 def build_postcard():
+
+	# c is Postcards Collection
 	c = reader.retrieve(fedora4base + "Postcards")
-	c.membersContainer.build_contents(reader)
+	c.build_contents(reader)
+ 	# Should there be a recursive option for build_contents() ?
+ 	# Dangerous?
+
 	for m in c.members:
 		# m is a Postcard Object
-		m.membersContainer.build_contents(reader)
+		m.build_contents(reader)
 		for n in m.members:
 			# n is a front/back Object
-			n.filesContainer.build_contents(reader)
+			n.build_contents(reader)
 
+	return c
