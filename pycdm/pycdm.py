@@ -33,6 +33,12 @@ class LDPResource(object):
 		self.contentType = ""
 		self.container = container		
 
+	def http_setup(self, req, reader=None):
+		self.data = req.content
+		self.etag = req.headers.get('etag', '')
+		self.link = req.headers.get('link', '')
+		self.contentType = req.headers.get('content-type', '')
+
 	def read(self, filename):
 		# Read content in from disk
 		# Only useful for first load
@@ -106,6 +112,11 @@ class RdfSource(LDPResource):
 		if self._type:
 			self.add_field('@type', self._type)
 
+	def http_setup(self, req, reader):
+		super(RdfSource, self).http_setup(req, reader)
+		if self.contentType.startswith("application/ld+json"):
+			self.json = reader.clean_f4(req.json(), self.uri)		
+
 	def add_field(self, what, value):
 		# ensure non-duplicates
 		if self.json.has_key(what):
@@ -173,9 +184,9 @@ class Container(RdfSource):
 
 	def build_from_rdf(self, reader):
 		super(Container, self).build_from_rdf(reader)
-		if self.json and self.json.has_key('ldp:contains'):
+		if self.json and self.json.has_key('contains'):
 			# And be ready to replace these with real objects later
-			self.contains = self.json['ldp:contains']
+			self.contains = self.json['contains']
 
 	def create_child(self, what):
 		# Given an LDPResource, create it in self
@@ -185,6 +196,16 @@ class Container(RdfSource):
 		# And add to contains and _contains_map
 		self.contains.append(what.uri)
 		self._contains_map[what.uri] = what
+
+	def retrieve_children(self, rdr):
+		kids = []
+		if type(self.contains) == list:
+			for uri in self.contains:
+				uri = rdr.get_uri(uri)
+				kids.append(self.retrieve_child(uri, rdr))
+		else:
+			kids.append(self.retrieve_child(rdr.get_uri(self.contains), rdr))
+		return kids
 
 	def retrieve_child(self, uri, rdr):
 		if self._contains_map.has_key(uri):
@@ -225,13 +246,20 @@ class DirectContainer(Container):
 	def build_from_rdf(self, reader):
 		super(DirectContainer, self).build_from_rdf(reader)
 
-		if self.json.has_key('ldp:membershipResource'):
-			uri = self.json['ldp:membershipResource']
+		if self.json.has_key('membershipResource'):
+			uri = reader.get_uri(self.json['membershipResource'])
 			self.membershipResource = reader.retrieve(uri)
-		if self.json.has_key('ldp:hasMemberRelation'):
-			self.hasMemberRelation = self.json['ldp:hasMemberRelation']
-		if self.json.has_key('ldp:isMemberOfRelation'):
-			self.isMemberOfRelation = self.json['ldp:isMemberOfRelation']
+		if self.json.has_key('hasMemberRelation'):
+			self.hasMemberRelation = self.json['hasMemberRelation']
+		if self.json.has_key('isMemberOfRelation'):
+			self.isMemberOfRelation = self.json['isMemberOfRelation']
+
+	def build_contents(self, reader):
+		# retrieve my kids
+		# process membershipResource.hasMemberRelation
+		prop = reader.property_map.get(self.hasMemberRelation, '')
+		kids = self.retrieve_children(reader)
+		setattr(self.membershipResource, prop, kids)
 
 
 class IndirectContainer(DirectContainer):
@@ -244,8 +272,8 @@ class IndirectContainer(DirectContainer):
 
 	def build_from_rdf(self, reader):
 		super(IndirectContainer, self).build_from_rdf(reader)
-		if self.json.has_key('ldp:insertedContentRelation'):
-			self.insertedContentRelation = self.json['ldp:insertedContentRelation']
+		if self.json.has_key('insertedContentRelation'):
+			self.insertedContentRelation = self.json['insertedContentRelation']
 
 	def to_jsonld(self):
 		js = super(IndirectContainer, self).to_jsonld()		
@@ -253,8 +281,16 @@ class IndirectContainer(DirectContainer):
 			js['ldp:insertedContentRelation'] = self.insertedContentRelation
 		return js
 
-
-
+	def build_contents(self, reader):
+		# retrieve my kids
+		# process membershipResource.hasMemberRelation kid.insertedContentRelation
+		myprop = reader.property_map.get(self.hasMemberRelation, '')
+		icprop = reader.property_map.get(self.insertedContentRelation, '')
+		kids = self.retrieve_children(reader)
+		vals = []
+		for k in kids:
+			vals.append(getattr(k, icprop))
+		setattr(self.membershipResource, myprop, vals)
 
 # PCDM resources contain containers
 class PcdmResource(Container):
@@ -287,7 +323,7 @@ class PcdmResource(Container):
 		self.membersContainer = members
 		self.relatedObjectsContainer = relatedObjects
 
-		if self.json.has_key('iana:first'):
+		if self.json.has_key('first'):
 			self.ordered = True
 
 	# post init, do setup if going to do create
@@ -320,7 +356,7 @@ class PcdmResource(Container):
 
 	def add_member(self, what): 
 		# Create & return the proxy for the member object/collection
-		p = Proxy(slug=what.slug)
+		p = Proxy(slug=what.slug+"_proxy")
 		p.proxy_for = what
 		p.proxy_in = self		
 		# members is authoritative for first/last
@@ -353,7 +389,6 @@ class PcdmResource(Container):
 	# is overwritten
 	def get_proxy(self, what):
 		return self._proxyHash[what]
-
 
 class Collection(PcdmResource):
 	_type = "pcdm:Collection"
@@ -442,8 +477,8 @@ class Proxy(RdfSource):
 
 	def build_from_rdf(self, reader):
 		super(Proxy, self).build_from_rdf(reader)
-		self.proxy_for = reader.retrieve(self.json['ore:proxyFor'])
-		self.proxy_in = reader.retrieve(self.json['ore:proxyIn'])		
+		self.proxy_for = reader.retrieve(self.json['proxyFor'])
+		self.proxy_in = reader.retrieve(self.json['proxyIn'])		
 
 	# Must be Proxy
 	def set_next(self, what):
@@ -460,8 +495,6 @@ class Proxy(RdfSource):
 class File(NonRdfSource):
 	pass
 	
-
-
 class LDPReader(object):
 
 	def __init__(self):
@@ -501,9 +534,15 @@ class LDPReader(object):
 		}
 		cmap = OrderedDict()
 		# from best to worst so we can iter through it
+		cmap['Object'] = Object
+		cmap['Collection'] = Collection
 		cmap['pcdm:Object'] = Object
 		cmap['pcdm:Collection'] = Collection
+		cmap['Proxy'] = Proxy		
 		cmap['ore:Proxy'] = Proxy
+		cmap['IndirectContainer'] = IndirectContainer
+		cmap['DirectContainer'] = DirectContainer
+		cmap['BasicContainer'] = BasicContainer
 		cmap['ldp:IndirectContainer'] = IndirectContainer
 		cmap['ldp:DirectContainer'] = DirectContainer
 		cmap['ldp:BasicContainer'] = BasicContainer
@@ -511,9 +550,33 @@ class LDPReader(object):
 		cmap['ldp:RDFSource'] = RdfSource
 		cmap['ldp:NonRDFSource'] = NonRdfSource
 		cmap['pcdm:File'] = NonRdfSource
+		cmap['File'] = NonRdfSource
 		self.class_map = cmap
-
 		self.object_map = {}
+
+		# in/direct container predicate to object property
+		self.property_map = {
+			"pcdm:hasMember" : "members",
+			"pcdm:hasRelatedObject": "relatedObjects",
+			"pcdm:hasFile": "files",
+			"pcdm:hasRelatedFile": "relatedFiles",
+			"ore:proxyFor": "proxy_for"
+		}
+
+		fh = file('context.json')
+		data = fh.read()
+		fh.close()
+		self.context = json.loads(data)
+
+	def get_uri(self, uri):
+		try:
+			return uri['@id']
+		except:
+			if type(uri) in [str, unicode]:
+				return uri
+			else:
+				print "Got: %r" % uri
+				return None
 
 	def clean_f4(self, js, uri):
 		# strip out random F4 nonsense
@@ -536,11 +599,11 @@ class LDPReader(object):
 			js['@type'] = nt
 
 		# Now compact it
-		js = jsonld.compact(js, self.namespaces)
+		js = jsonld.compact(js, self.context)
 		del js['@context']
 		return js
 
-	def retrieve(self, uri):
+	def retrieve(self, uri, instance=None):
 		print "Getting: " + uri
 
 		if self.object_map.has_key(uri):
@@ -549,56 +612,40 @@ class LDPReader(object):
 		req = requests.get(url=uri, headers=self.ldp_headers_get)
 		req.raise_for_status()
 
-		link_header = req.headers.get('link', '')
-		etag = req.headers.get('etag', '')
-		mime = req.headers.get('content-type', '')
-
-		# XXX allow NonRDFSource
-		data = req.content
-		if mime == "application/ld+json":
-			js = self.clean_f4(req.json(), uri)
-		else:
-			# Should we look at fcr:metadata?
-			js = {}
-
+		ct = req.headers.get('content-type', '')
 		# Find most appropriate @type
-		tomake = None
-		for k,v in self.class_map.items():
-			if k in js['@type']:
-				tomake = v
-				break
+		if ct.startswith('application/ld+json'):
+			# Grab the json and look for classes
+			if instance == None:
+				js = self.clean_f4(req.json(), uri)
+				for k,v in self.class_map.items():
+					if k in js['@type']:
+						tomake = v
+						break
+				if tomake == None:
+					raise ValueError()
 
-		if tomake:
-			# make a v()
-			what = v(uri)
-			# Record it so we can look it up later
-			self.object_map[uri]= what
-			what.etag = etag
-			what.link = link_header
-			what.contentType = mime
-			what.data = data
-			what.json = js
-			what.context = self.namespaces
-			what.context['ldp:hasMemberRelation'] = {'@type': '@id'}
-			what.context['ldp:isMemberOfRelation'] = {'@type': '@id'}
-			what.context['ldp:membershipResource'] = {'@type': '@id'}
-			what.context['ldp:insertedContentRelation'] = {'@type': '@id'}
-			what.context['ore:proxyFor'] = {'@type': '@id'}
-			what.context['ore:proxyIn'] = {'@type': '@id'}
-			try:
-				what.build_from_rdf(self)
-			except:
-				raise
+				# make a tomake()
+				instance = tomake(uri)
+				instance.context = self.context
+				self.object_map[uri]= instance
+				instance.http_setup(req, self)
+				try:
+					instance.build_from_rdf(self)
+				except:
+					raise
 		else:
-			raise ValueError()
+			# NonRdfSource
+			instance = File(uri)						
+			self.object_map[uri] = instance
+			instance.http_setup(req, self)
+			# And where does our metadata live?
 
-		return what
-
+		return instance
 
 fedora4base = "http://localhost:8080/rest/"
 reader = LDPReader()
 base = reader.retrieve(fedora4base)
-
 
 def clean_postcard():
 	slugs = ['Postcards', 'Postcard', 'Front', 'Back']
@@ -635,7 +682,6 @@ def test_postcard():
     base.create_child(back)
     pc.add_member(back)
 
-
     ff = File(slug="front.jpg", filename="../front.jpg")
     ff.contentType = "image/jpeg"
     front.add_file(ff)
@@ -648,3 +694,11 @@ def test_postcard():
 
 def build_postcard():
 	c = reader.retrieve(fedora4base + "Postcards")
+	c.membersContainer.build_contents(reader)
+	for m in c.members:
+		# m is a Postcard Object
+		m.membersContainer.build_contents(reader)
+		for n in m.members:
+			# n is a front/back Object
+			n.filesContainer.build_contents(reader)
+
