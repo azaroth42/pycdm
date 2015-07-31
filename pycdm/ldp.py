@@ -171,11 +171,13 @@ class RdfSource(LDPResource):
 	_type = "ldp:RDFSource"
 	json = {}
 	context = {}
+	_setup = False
 
 	def __init__(self, uri="", slug="", container=None):
 		super(RdfSource, self).__init__(uri=uri, slug=slug, container=container)
 		self.json = {}
 		self.contentType = 'application/ld+json'
+		self._setup = False
 		if self._type:
 			self.add_field('@type', self._type)
 
@@ -202,7 +204,7 @@ class RdfSource(LDPResource):
 
 	def setup(self):
 		# noop
-		pass
+		self._setup = True
 
 	def to_jsonld(self):
 		js = self.json.copy()
@@ -222,6 +224,9 @@ class RdfSource(LDPResource):
 		elif not self.container:
 			# Require a container to be created in
 			raise ValueError()
+
+		if not self._setup:
+			self.setup()
 
 		js = self.to_jsonld()
 		jstr = json.dumps(js)
@@ -350,7 +355,8 @@ class DirectContainer(Container):
 		# retrieve my kids
 		# process membershipResource.hasMemberRelation
 		prop = reader.property_map.get(self.hasMemberRelation, '')
-		kids = self.retrieve_children(reader)
+		# _children is now a generator
+		kids = list(self.retrieve_children(reader))
 		setattr(self.membershipResource, prop, kids)
 
 
@@ -378,6 +384,7 @@ class IndirectContainer(DirectContainer):
 		# process membershipResource.hasMemberRelation kid.insertedContentRelation
 		myprop = reader.property_map.get(self.hasMemberRelation, '')
 		icprop = reader.property_map.get(self.insertedContentRelation, '')
+		# a generator...
 		kids = self.retrieve_children(reader)
 		vals = []
 		for k in kids:

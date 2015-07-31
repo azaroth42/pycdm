@@ -63,6 +63,7 @@ class PcdmResource(Container):
 	# post init, do setup if going to do create
 	def setup(self):
 		# create the containers
+		super(PcdmResource, self).setup()
 		members = IndirectContainer(slug='members')
 		# this is '' before self is created ...
 		members.membershipResource = self
@@ -90,7 +91,6 @@ class PcdmResource(Container):
 		# XXX Order dependent on update capability
 		if self.ordered:
 			f = self.json['first']
-
 
 
 	def to_jsonld(self):

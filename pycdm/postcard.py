@@ -8,28 +8,23 @@ base = reader.retrieve(fedora4base)
 
 def create_postcards():
     c = Collection(slug='Postcards')
-    c.setup()
     c.add_field('rdfs:label', "Postcards Collection")
     base.create_child(c)  # create it in F4
 
     pc = Object(slug='Postcard', ordered=True)
-    pc.setup()
     pc.add_field('label', 'Postcard')
     base.create_child(pc)   # This is when we get created in F4   
     pcp = c.add_member(pc)  # And now we modify to add order :(
 
     front = Object(slug='Front')
-    front.setup()
     base.create_child(front)
     pc.add_member(front)
 
     back = Object(slug='Back')
-    back.setup()
     base.create_child(back)
     pc.add_member(back)
 
     # Now we need to update Postcard and Proxies to set order?
-
     ff = File(slug="front.jpg", filename="../front.jpg")
     ff.contentType = "image/jpeg"
     front.add_file(ff)
@@ -53,7 +48,7 @@ def delete_postcards():
 			what = base.head_child(s, reader)
 			what.delete(tombstone=True)  # Kill it dead
 		except:
-			pass
+			raise
 
 ####
 #
