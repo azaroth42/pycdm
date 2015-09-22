@@ -65,6 +65,12 @@ class LDPResource(object):
 		self.data = fh.read()
 		fh.close()
 
+	def update_etag(self):	
+		hdrs = {'Accept': self.contentType}		
+		req = requests.head(url=self.uri, headers=hdrs)
+		req.raise_for_status()
+		self.etag = req.headers['etag']
+
 	def create(self):
 		# POST representation to container
 		hdrs = {'Content-Type': self.contentType}
@@ -497,7 +503,6 @@ class LDPReader(object):
 		if self.object_map.has_key(uri):
 			return self.object_map[uri]
 
-		print "Heading: " + uri
 		req = requests.head(url=uri, headers=self.ldp_headers_get)
 		req.raise_for_status()
 

@@ -95,6 +95,7 @@ class PcdmResource(Container):
 
 	def to_jsonld(self):
 		js = super(PcdmResource, self).to_jsonld()
+
 		if self.ordered and self.members:
 			js['first'] = self.get_proxy(self.members[0]).uri
 			js['last'] = self.get_proxy(self.members[-1]).uri
@@ -104,6 +105,9 @@ class PcdmResource(Container):
 		super(PcdmResource, self).create()
 		self.create_child(self.membersContainer)
 		self.create_child(self.relatedObjectsContainer)
+		self.update_etag()
+		self.patch_single("memberContainer", self.membersContainer.uri)
+		self.patch_single("relatedContainer", self.relatedObjectsContainer.uri)
 
 	def add_member(self, what): 
 		# Create & return the proxy for the member object/collection
@@ -155,24 +159,19 @@ class Object(PcdmResource):
 
 	def __init__(self, uri="", slug="", ordered=False):
 		super(Object, self).__init__(uri=uri, slug=slug, ordered=ordered)
-		# files / related_files are pcdm:File objects
+		# files are pcdm:File objects
 		self.files = []
-		self.related_files = []
 
 	def build_from_rdf(self, reader):
 		super(Object, self).build_from_rdf(reader)
 		# Check if members in contains
 		filesuri = os.path.join(self.uri, 'files')
-		relatedfilesuri = os.path.join(self.uri, 'relatedFiles')
 		filesc = reader.retrieve(filesuri)
-		relatedfilesc = reader.retrieve(relatedfilesuri)
 		self.filesContainer = filesc
-		self.relatedFilesContainer = relatedfilesc
 
 	def build_contents(self, reader, recursive=False):
 		super(Object, self).build_contents(reader, recursive)
 		self.filesContainer.build_contents(reader, recursive)
-		self.relatedFilesContainer.build_contents(reader, recursive)
 
 	def setup(self):
 		# create the containers
@@ -181,18 +180,16 @@ class Object(PcdmResource):
 		filesc.membershipResource = self
 		filesc.hasMemberRelation = 'pcdm:hasFile'
 		self.filesContainer = filesc
-		relatedfilesc = DirectContainer(slug='relatedFiles')
-		relatedfilesc.membershipResource = self
-		relatedfilesc.hasMemberRelation = 'pcdm:hasRelatedFile'
-		self.relatedFilesContainer = relatedfilesc
 
 	def create(self):
 		super(Object, self).create()
 		self.create_child(self.filesContainer)
-		self.create_child(self.relatedFilesContainer)
+		self.update_etag()
+		self.patch_single('fileContainer', self.filesContainer.uri)
 
 	def add_file(self, what):
 		self.filesContainer.create_child(what)
+		# Create a specific DirectContainer to manipulate 
 
 	def remove_file(self, what):
 		pass

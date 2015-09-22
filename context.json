@@ -25,6 +25,7 @@
 		"xs": "http://www.w3.org/2001/XMLSchema#",	
 		"xml": "http://www.w3.org/XML/1998/namespace#",
 		"xsi": "http://www.w3.org/2001/XMLSchema-instance#",
+		"xs": "http://www.w3.org/2001/XMLSchema#",
 
 		"nt": "http://www.jcp.org/jcr/nt/1.0",
 		"fedoraconfig": "http://fedora.info/definitions/v4/config#",
@@ -67,6 +68,10 @@
 		"Collection": {"@id": "pcdm:Collection"},
 		"File": {"@id": "pcdm:File"},
 		"Proxy": {"@id": "ore:Proxy"},
+
+		"memberContainer": {"@id": "pcdm:hasMembershipContainer", "@type": "@id"},
+		"relatedContainer": {"@id": "pcdm:hasRelatedContainer", "@type": "@id"},
+		"fileContainer": {"@id": "pcdm:hasFileContainer", "@type": "@id"},
 
 		"contains": {"@id": "ldp:contains", "@type": "@id"},
 		"membershipResource": {"@id": "ldp:membershipResource", "@type": "@id"},
