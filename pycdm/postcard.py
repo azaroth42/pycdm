@@ -1,4 +1,4 @@
-
+import sys
 import os
 from pycdm import Collection, Object, File, PcdmReader
 
@@ -62,4 +62,10 @@ def delete_every_mother_f_ing_thing():
 	for kid in base.head_children(reader):
 		kid.delete(tombstone=True)
 
+
+if __name__ == "__main__":
+    if '--create' in sys.argv:
+        c = create_postcards()
+    if '--delete' in sys.argv:
+        delete_postcards()
 

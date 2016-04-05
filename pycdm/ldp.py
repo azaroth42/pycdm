@@ -113,17 +113,48 @@ class LDPResource(object):
 			req = requests.delete(url=tomburi)
 			req.raise_for_status()
 
+
+class NonRDFSource(LDPResource):
+	_type = "ldp:NonRDFSource"
+	describedby = None
+
+	def __init__(self, uri="", slug="", filename="", data=""):
+		super(NonRDFSource, self).__init__(uri, slug)		
+		self.describedby = None
+		if not uri:
+			if data:
+				self.data = data
+			elif filename:
+				self.read(filename)
+
+	def http_setup(self, req, reader, target=None):
+		super(NonRDFSource, self).http_setup(req, reader, target)
+		# Now grab our metadata
+		dby = self.links['describedby'][0]
+		rdfs = RDFSource(uri=dby)
+		self.describedby = reader.retrieve(dby, instance=rdfs, target=self.uri)
+
+class RDFSource(LDPResource):
+	_type = "ldp:RDFSource"
+	json = {}
+	context = None
+	_setup = False
+
+	def __init__(self, uri="", slug="", container=None, context=None):
+		super(RDFSource, self).__init__(uri=uri, slug=slug, container=container)
+		self.json = {}
+		self.contentType = 'application/ld+json'
+		self._setup = False
+		self.context = context
+		if self._type:
+			self.add_field('@type', self._type)
+
 	def patch_single(self, field, value):
 		if not self.uri:
 			raise ValueError()
 
-		if field.find(':') == -1 and self.context.has_key(field):
-			# Look in our context
-			cf = self.context[field]
-			if type(cf) == dict:
-				field = cf['@id']
-			else:
-				field = cf
+		if field.find(':') == -1:
+			field = self.context.get_mapping(field)
 
 		if type(value) in [str, unicode]:
 			if value.find(' ') > -1 and value[0] != '"':
@@ -138,11 +169,8 @@ class LDPResource(object):
 		if self.etag:
 			hdrs['If-Match'] = self.etag
 
-		patch = []
 		# Generate prefixes from context
-		for pfx,val in self.context.items():
-			if type(val) in [str, unicode] and val.startswith('http'):
-				patch.append("PREFIX %s: <%s>" % (pfx, val))
+		patch = self.context.get_prefixes()
 		patch.append("")
 		patch.append("INSERT {<> %s %s .}" % (field, value))
 		patch.append("WHERE {}")
@@ -152,43 +180,17 @@ class LDPResource(object):
 		req.raise_for_status()
 		self.etag = req.headers.get('etag', '')
 
-
-class NonRdfSource(LDPResource):
-	_type = "ldp:NonRDFSource"
-	describedby = None
-
-	def __init__(self, uri="", slug="", filename="", data=""):
-		super(NonRdfSource, self).__init__(uri, slug)		
-		self.describedby = None
-		if not uri:
-			if data:
-				self.data = data
-			elif filename:
-				self.read(filename)
+	def read(self, filename):
+		super(RDFSource, self).read(filename)
+		# And make .json
+		try:
+			js = json.loads(self.data)
+			self.json = js
+		except:
+			print "Can only handle JSON-LD at the moment"
 
 	def http_setup(self, req, reader, target=None):
-		super(NonRdfSource, self).http_setup(req, reader, target)
-		# Now grab our metadata
-		dby = self.links['describedby'][0]
-		rdfs = RdfSource(uri=dby)
-		self.describedby = reader.retrieve(dby, instance=rdfs, target=self.uri)
-
-class RdfSource(LDPResource):
-	_type = "ldp:RDFSource"
-	json = {}
-	context = {}
-	_setup = False
-
-	def __init__(self, uri="", slug="", container=None):
-		super(RdfSource, self).__init__(uri=uri, slug=slug, container=container)
-		self.json = {}
-		self.contentType = 'application/ld+json'
-		self._setup = False
-		if self._type:
-			self.add_field('@type', self._type)
-
-	def http_setup(self, req, reader, target=None):
-		super(RdfSource, self).http_setup(req, reader, target)
+		super(RDFSource, self).http_setup(req, reader, target)
 		if self.data and self.contentType.startswith("application/ld+json"):
 			clean_uri = target if target else self.uri
 			self.json = reader.clean_jsonld(req.json(), clean_uri)		
@@ -217,11 +219,15 @@ class RdfSource(LDPResource):
 		if not js.has_key('@context'):
 			if not self.context:
 				self.context = self.container.context
-			js['@context'] = self.context
+			js['@context'] = self.context.data
+
 		if not js.has_key('@id'):
-			# ensure that the URI is null relative for create
-			# otherwise it's a blank node
-			js['@id'] = ""
+			if self.context.id_alias:
+				if not js.has_key(self.context.id_alias):
+					js[self.context.id_alias] = ""				
+			else:
+				js['@id'] = ""
+
 		return js
 
 	def create(self):
@@ -231,13 +237,18 @@ class RdfSource(LDPResource):
 			# Require a container to be created in
 			raise ValueError()
 
+		# print json.dumps(self.json, indent=2)
+
 		if not self._setup:
 			self.setup()
-
 		js = self.to_jsonld()
+
+		# print json.dumps(self.json, indent=2)		
+
 		jstr = json.dumps(js)
+		
 		self.data  = jstr
-		super(RdfSource, self).create()
+		super(RDFSource, self).create()
 
 	def update(self):
 		if not self.uri:
@@ -248,10 +259,10 @@ class RdfSource(LDPResource):
 		js = self.to_jsonld()
 		jstr = json.dumps(js)
 		self.data = jstr
-		super(RdfSource, self).update()
+		super(RDFSource, self).update()
 
 
-class Container(RdfSource):
+class Container(RDFSource):
 	_type = "ldp:Container"
 	contains = []
 	_contains_map = {}
@@ -273,6 +284,8 @@ class Container(RdfSource):
 		what.container = self
 		what.create()
 		# And add to contains and _contains_map
+		if type(self.contains) in [str, unicode]:
+			self.contains = [self.contains]
 		self.contains.append(what.uri)
 		self._contains_map[what.uri] = what
 
@@ -396,8 +409,50 @@ class IndirectContainer(DirectContainer):
 		for k in kids:
 			vals.append(getattr(k, icprop))
 		setattr(self.membershipResource, myprop, vals)
-
 	
+
+class JsonLdContext(object):
+
+	def __init__(self, filename="", data={}):
+		if filename:
+			fh = file(filename)
+			jstr = fh.read()
+			fh.close()
+			data = json.loads(jstr)
+		if data.has_key('@context'):
+			data = data['@context']
+		self.data = data
+
+		self.id_alias = ""
+		self.type_alias = ""
+		# Process context for aliases for @id and @type
+		for (k,v) in data.items():
+			if type(v) == dict:
+				if v['@id'] == "@id":
+					self.id_alias = k
+				elif v['@id'] == "@type":
+					self.type_alias = k
+
+		self.namespaces = {}
+		for pfx,val in self.data.items():
+			if type(val) in [str, unicode] and val.startswith('http'):
+				self.namespaces[pfx] = val
+		
+	def get_mapping(self, field):
+		if self.data.has_key(field):
+			cf = self.data[field]
+			if type(cf) == dict:
+				field = cf['@id']
+			else:
+				field = cf		
+		return field
+
+	def get_prefixes(self):
+		pfxs = []
+		for (k,v) in self.namespaces.items():
+			pfxs.append("PREFIX %s: <%s>" % (k,v))
+		return pfxs
+
 class LDPReader(object):
 
 	def __init__(self, context = None):
@@ -406,8 +461,8 @@ class LDPReader(object):
 		cmap = OrderedDict()
 		# from worst to best so subclasses can just add
 
-		cmap['ldp:RDFSource'] = RdfSource
-		cmap['ldp:NonRDFSource'] = NonRdfSource
+		cmap['ldp:RDFSource'] = RDFSource
+		cmap['ldp:NonRDFSource'] = NonRDFSource
 		cmap['ldp:Container'] = Container
 		cmap['ldp:IndirectContainer'] = IndirectContainer
 		cmap['ldp:DirectContainer'] = DirectContainer
@@ -421,17 +476,18 @@ class LDPReader(object):
 		self.property_map = {}
 
 		if context:
-			fh = file(context)
-			data = fh.read()
-			fh.close()
-			self.context = json.loads(data)['@context']
+			if isinstance(context, JsonLdContext):
+				self.context = context
+			elif type(context) in [str, unicode]:
+				self.context = JsonLdContext(filename=context)
+			elif type(context) == dict:
+				self.context = JsonLdContext(data=context)
 		else:
-			self.context = {}
-
+			self.context = None
 
 	def get_uri(self, uri):
 		try:
-			return uri['@id']
+			return uri.get("@id", uri.get(self.context.id_alias))
 		except:
 			if type(uri) in [str, unicode]:
 				return uri
@@ -444,11 +500,11 @@ class LDPReader(object):
 			# find actual object
 			# NB for fcr:metadata it's not retrieved URI
 			for o in js:
-				if o['@id'] == uri:
+				if o['@id'] == uri or (self.context.id_alias and o.get(self.context.id_alias, '') == uri):
 					js = o
 					break
 
-		js = jsonld.compact(js, self.context)
+		js = jsonld.compact(js, self.context.data)
 		del js['@context']
 		return js
 
@@ -469,12 +525,14 @@ class LDPReader(object):
 			if instance == None:
 				js = self.clean_jsonld(req.json(), clean_uri)
 				# N.B. stepping through from end to beginning
+				tomake = None
+				types = js.get("@type", js.get(self.context.type_alias, []))
 				for k,v in reversed(self.class_map.items()):
-					if k in js['@type']:
+					if k in types:
 						tomake = v
 						break
 				if tomake == None:
-					raise ValueError()
+					raise ValueError("Could not find class to build in class_map")
 
 				# make a tomake()
 				instance = tomake(uri)
@@ -491,7 +549,7 @@ class LDPReader(object):
 
 		else:
 			# NonRdfSource, make a ldp:NonRdfSource
-			instance = NonRdfSource(uri)						
+			instance = NonRDFSource(uri)						
 			self.object_map[uri] = instance
 			instance.http_setup(req, self)
 
@@ -510,12 +568,12 @@ class LDPReader(object):
 		if ct.startswith('application/ld+json'):
 			# Just make an RDFSource as we don't know what else to do
 			#    without the content to inspect for @type
-			instance = RdfSource(uri)
+			instance = RDFSource(uri)
 			instance.context = self.context  # probably unnecessary
 			instance.http_setup(req, self)
 		else:
 			# NonRdfSource, make a ldp:NonRdfSource
-			instance = NonRdfSource(uri)						
+			instance = NonRDFSource(uri)						
 			instance.http_setup(req, self)
 
 		return instance

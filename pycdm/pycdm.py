@@ -1,6 +1,6 @@
 
 import os
-from ldp import Container, DirectContainer, IndirectContainer, RdfSource, NonRdfSource, LDPReader
+from ldp import Container, DirectContainer, IndirectContainer, RDFSource, NonRDFSource, LDPReader
 
 class PcdmReader(LDPReader):
 	def __init__(self, context = None):
@@ -8,11 +8,11 @@ class PcdmReader(LDPReader):
 
 		cmap = self.class_map
 
-		cmap['pcdm:File'] = NonRdfSource
+		cmap['pcdm:File'] = NonRDFSource
 		cmap['pcdm:Object'] = Object
 		cmap['pcdm:Collection'] = Collection		
 		cmap['ore:Proxy'] = Proxy
-		cmap['File'] = NonRdfSource
+		cmap['File'] = NonRDFSource
 		cmap['Collection'] = Collection
 		cmap['Proxy'] = Proxy
 		cmap['Object'] = Object
@@ -130,14 +130,14 @@ class PcdmResource(Container):
 		return p
 
 	def remove_member(self, what):
-		# Could be proxy or object
+		# XXX Could be proxy or object
 		pass
 
 	def add_related_object(self, what):
 		pass
 
 	def remove_related_object(self, what):
-		# Could be proxy or object
+		# XXX Could be proxy or object
 		pass
 
 	# NB only gets the most recent proxy for what
@@ -200,7 +200,7 @@ class Object(PcdmResource):
 	def remove_related_file(self, what):
 		pass
 
-class Proxy(RdfSource):
+class Proxy(RDFSource):
 	_type = "ore:Proxy"
 	proxy_for=None
 	proxy_in= None
@@ -246,5 +246,5 @@ class Proxy(RdfSource):
 		what.set_next(self)
 
 
-class File(NonRdfSource):
+class File(NonRDFSource):
 	pass

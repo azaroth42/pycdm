@@ -22,10 +22,6 @@
         "prov": "http://www.w3.org/ns/prov#",
         "sc": "http://iiif.io/api/presentation/2#",
         "svcs": "http://rdfs.org/sioc/services#",
-		"xs": "http://www.w3.org/2001/XMLSchema#",	
-		"xml": "http://www.w3.org/XML/1998/namespace#",
-		"xsi": "http://www.w3.org/2001/XMLSchema-instance#",
-		"xs": "http://www.w3.org/2001/XMLSchema#",
 
 		"nt": "http://www.jcp.org/jcr/nt/1.0",
 		"fedoraconfig": "http://fedora.info/definitions/v4/config#",
@@ -34,7 +30,6 @@
 		"sv": "http://www.jcp.org/jcr/sv/1.0",
 		"fedora": "http://fedora.info/definitions/v4/repository#",
 		"mix": "http://www.jcp.org/jcr/mix/1.0",
-		"jcr": "http://www.jcp.org/jcr/",
 
 		"hasMember": {"@id": "pcdm:hasMember", "@type": "@id"},
 		"hasRelatedObject": {"@id": "pcdm:hasRelatedObject","@type": "@id"},
