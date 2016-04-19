@@ -194,11 +194,6 @@ class Object(PcdmResource):
 	def remove_file(self, what):
 		pass
 
-	def add_related_file(self, what):
-		pass
-
-	def remove_related_file(self, what):
-		pass
 
 class Proxy(RDFSource):
 	_type = "ore:Proxy"
