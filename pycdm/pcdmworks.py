@@ -85,38 +85,4 @@ class Object(PcdmObject):
 		self.filesetsContainer.create_child(fileset)
 
 class FileSet(PcdmObject):
-	master = []
-	masterContainer = None
-
-	def __init__(self, uri="", slug="", ordered=False):
-		super(FileSet, self).__init__(uri=uri, slug=slug, ordered=ordered)
-		self.master = []
-		self.masterContainer = None
-
-	def build_from_rdf(self, reader):
-		super(FileSet, self).build_from_rdf(reader)
-		masteruri = os.path.join(self.uri, 'master')
-		self.masterContainer = reader.retrieve(masteruri)
-
-	def setup(self):
-		super(FileSet, self).setup()
-		m = DirectContainer(slug='master')
-		# this is '' before self is created ...
-		m.membershipResource = self
-		m.hasMemberRelation = 'pcdm:hasMaster'
-		self.masterContainer = m
-
-	def build_contents(self, reader, recursive=False):
-		super(FileSet, self).build_contents(reader, recursive)
-		self.masterContainer.build_contents(reader, recursive)
-
-	def create(self):
-		super(FileSet, self).create()
-		self.create_child(self.masterContainer)
-		self.update_etag()
-
-	def add_master_file(self, what):
-		self.masterContainer.create_child(what)
-
-
-
+	pass

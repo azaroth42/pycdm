@@ -2,27 +2,40 @@ import sys
 import os
 from pycdm import File
 from pcdmworks import Collection, Object, FileSet, PcdmReader
+from ldp import BasicContainer
 
 fedora4base = "http://localhost:8080/rest/"
 reader = PcdmReader(context="../context.json")
 base = reader.retrieve(fedora4base)
 
 def create_postcards():
+
+    cs = BasicContainer(slug='Collections')
+    base.create_child(cs)
+    os = BasicContainer(slug='Objects')
+    base.create_child(os)
+    agents = BasicContainer(slug="Agents")
+    base.create_child(agents)
+    rwos = BasicContainer(slug="RWOs")
+    base.create_child(rwos)
+    places = BasicContainer(slug="Places")
+    base.create_child(places)
+
     c = Collection(slug='Postcards')
     c.add_field('rdfs:label', "Postcards Collection")
-    base.create_child(c)  # create it in F4
+    cs.create_child(c)  # create it in F4
 
     pc = Object(slug='Postcard', ordered=True)
     pc.add_field('label', 'Postcard')
-    base.create_child(pc)   # This is when we get created in F4   
+    os.create_child(pc)   # This is when we get created in F4   
     pcp = c.add_member(pc)  # And now we modify to add order :(
 
     front = Object(slug='Front')
-    base.create_child(front)
+    os.create_child(front)
     pc.add_member(front)
 
     back = Object(slug='Back')
-    base.create_child(back)
+    os.create_child(back)
     pc.add_member(back)
 
     frontfs = FileSet(slug='FrontFiles')
